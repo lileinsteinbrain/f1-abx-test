@@ -91,7 +91,7 @@ for _, row in df.iterrows():
 st.success("✅ 数据已自动上传至 Google Sheet！")
 st.download_button("下载结果 CSV", df.to_csv(index=False).encode("utf-8"),
                     file_name=f"{participant}_abx.csv", mime="text/csv")
-    st.stop()
+st.stop()
 
 t = trials[i]
 st.subheader(f"题目 {i+1}/{len(trials)} — 模式：{t['condition'].upper()}")
