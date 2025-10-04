@@ -1,6 +1,6 @@
 import gspread
 from google.oauth2.service_account import Credentials
-import random, time
+import random, time, re
 from pathlib import Path
 import pandas as pd
 import streamlit as st
@@ -27,6 +27,17 @@ def _get_ws():
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(SHEET_ID)
     return sh.sheet1
+
+# ---------- 文件名解析：lap/seg ----------
+def parse_lap(path_str: str):
+    """从路径/文件名里解析 lap 号，如 'stim/VER/lap32_seg01_fp.png' -> 32。失败返回 None。"""
+    m = re.search(r'lap(\d+)', str(path_str))
+    return int(m.group(1)) if m else None
+
+def parse_seg(path_str: str):
+    """从路径/文件名里解析 seg 号，如 '.../lap32_seg03_fp.png' -> 3。失败返回 None。"""
+    m = re.search(r'seg(\d+)', str(path_str))
+    return int(m.group(1)) if m else None
 
 # ---------- 刺激扫描 ----------
 def scan_stim():
@@ -73,7 +84,7 @@ def make_abx_trials(df, n, modes):
     df = df[df["condition"].isin(modes)].reset_index(drop=True)
     trials = []
     rng = random.Random()
-    for i in range(n):
+    for _ in range(n):
         cond = rng.choice(modes)
         cand = df[df["condition"]==cond].sample(3)
         A, B, X = cand.iloc[0].to_dict(), cand.iloc[1].to_dict(), cand.iloc[2].to_dict()
@@ -82,11 +93,17 @@ def make_abx_trials(df, n, modes):
         rng.shuffle(AB)
         A, B = AB[0], AB[1]
         correct = "A" if A["driver"] == X["driver"] else "B"
+
+        # 解析 lap/seg
+        A_lap, A_seg = parse_lap(A["path"]), parse_seg(A["path"])
+        B_lap, B_seg = parse_lap(B["path"]), parse_seg(B["path"])
+        X_lap, X_seg = parse_lap(X["path"]), parse_seg(X["path"])
+
         trials.append(dict(
             is_practice=False, condition=cond,
-            A_driver=A["driver"], A_path=A["path"],
-            B_driver=B["driver"], B_path=B["path"],
-            X_driver=X["driver"], X_path=X["path"],
+            A_driver=A["driver"], A_path=A["path"], A_lap=A_lap, A_seg=A_seg,
+            B_driver=B["driver"], B_path=B["path"], B_lap=B_lap, B_seg=B_seg,
+            X_driver=X["driver"], X_path=X["path"], X_lap=X_lap, X_seg=X_seg,
             correct_answer=correct
         ))
     return trials
@@ -102,12 +119,12 @@ if ("trials" not in st.session_state) or (st.session_state.get("participant") !=
 # ---------- Google Sheet 写入（统一在这里） ----------
 def log_trial_row_to_sheet(row_dict):
     """row_dict: 与最终 DataFrame 字段一致的 dict。"""
-    # Sheet 的列顺序（与你想要导出的 CSV 一致）
+    # Sheet 的列顺序（新增了 *seg 三列）
     cols = [
         "participant","trial_index","is_practice","condition",
-        "A_driver","A_lap","A_path",
-        "B_driver","B_lap","B_path",
-        "X_driver","X_lap","X_path",
+        "A_driver","A_lap","A_seg","A_path",
+        "B_driver","B_lap","B_seg","B_path",
+        "X_driver","X_lap","X_seg","X_path",
         "answer","correct_answer","is_correct","rt_ms","timestamp"
     ]
     row_list = [row_dict.get(k, "") for k in cols]
@@ -122,19 +139,17 @@ def log_trial_row_to_sheet(row_dict):
 i = st.session_state.i
 trials = st.session_state.trials
 
-# —— 全部做完：展示下载按钮（此时 df 已定义）——
+# —— 全部做完：展示下载按钮 —— 
 if i >= len(trials):
     st.success("✅ 全部完成！下方可下载结果 CSV。")
 
     df = pd.DataFrame(st.session_state.logs)
-
-    # 用 session_state 兜底，避免 NameError
     pname = st.session_state.get("participant", "anon")
 
     st.download_button(
         "下载结果 CSV",
         df.to_csv(index=False).encode("utf-8"),
-        file_name=f"{pname}_abx.csv",      # ← 这里用 pname
+        file_name=f"{pname}_abx.csv",
         mime="text/csv",
         use_container_width=True
     )
@@ -143,21 +158,20 @@ if i >= len(trials):
     if st.session_state.local_rows:
         cols = [
             "participant","trial_index","is_practice","condition",
-            "A_driver","A_lap","A_path",
-            "B_driver","B_lap","B_path",
-            "X_driver","X_lap","X_path",
+            "A_driver","A_lap","A_seg","A_path",
+            "B_driver","B_lap","B_seg","B_path",
+            "X_driver","X_lap","X_seg","X_path",
             "answer","correct_answer","is_correct","rt_ms","timestamp"
         ]
         df_local = pd.DataFrame(st.session_state.local_rows, columns=cols)
         st.download_button(
             "下载本地备份（写表失败的行）",
             df_local.to_csv(index=False).encode("utf-8"),
-            file_name=f"{pname}_abx_local_backup.csv",   # ← 同理
+            file_name=f"{pname}_abx_local_backup.csv",
             mime="text/csv",
             use_container_width=True
         )
     st.stop()
-
 
 # —— 还在做题：渲染当前题目 —— 
 t = trials[i]
@@ -200,15 +214,15 @@ if clicked:
     start = st.session_state.start_time or time.time()
     rt_ms = int((time.time() - start) * 1000)
 
-    # 形成一条日志（dict）
+    # 形成一条日志（dict）—— 现在包含 lap/seg
     row = dict(
         participant=participant,
         trial_index=i,
         is_practice=False,
         condition=t["condition"],
-        A_driver=t["A_driver"], A_lap="", A_path=t["A_path"],
-        B_driver=t["B_driver"], B_lap="", B_path=t["B_path"],
-        X_driver=t["X_driver"], X_lap="", X_path=t["X_path"],
+        A_driver=t["A_driver"], A_lap=t.get("A_lap"), A_seg=t.get("A_seg"), A_path=t["A_path"],
+        B_driver=t["B_driver"], B_lap=t.get("B_lap"), B_seg=t.get("B_seg"), B_path=t["B_path"],
+        X_driver=t["X_driver"], X_lap=t.get("X_lap"), X_seg=t.get("X_seg"), X_path=t["X_path"],
         answer=clicked,
         correct_answer=t["correct_answer"],
         is_correct=int(clicked == t["correct_answer"]),
