@@ -89,8 +89,8 @@ if i >= len(trials):
 for _, row in df.iterrows():
     SHEET.append_row(row.tolist())
 st.success("✅ 数据已自动上传至 Google Sheet！")
-    st.download_button("下载结果 CSV", df.to_csv(index=False).encode("utf-8"),
-                       file_name=f"{participant}_abx.csv", mime="text/csv")
+st.download_button("下载结果 CSV", df.to_csv(index=False).encode("utf-8"),
+                    file_name=f"{participant}_abx.csv", mime="text/csv")
     st.stop()
 
 t = trials[i]
