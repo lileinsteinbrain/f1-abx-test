@@ -6,18 +6,19 @@ import pandas as pd
 import streamlit as st
 from datetime import datetime
 
-
+# ---------- 基础配置 ----------
 ROOT = Path(__file__).parent
 STIM = ROOT / "stim"   # stim/VER|RUS|NOR/...
 
 st.set_page_config(page_title="F1 ABX Pilot", page_icon="🏁", layout="wide")
 st.title("F1 ABX Pilot Test")
 
-SHEET_ID = "1FUp4v1ZlGGY4r4pDeie96TXIp1F9eWnpI_HVc_w5c-M"  # 你的那个 ID
+# 你的 Google Sheet ID（只改这里）
+SHEET_ID = "1FUp4v1ZlGGY4r4pDeie96TXIp1F9eWnpI_HVc_w5c-M"
 
 @st.cache_resource(show_spinner=False)
 def _get_ws():
-    # 从 secrets 取 service account JSON
+    """返回 Google Sheet 的第一个工作表连接。"""
     sa = st.secrets["google_sheets"]
     creds = Credentials.from_service_account_info(sa, scopes=[
         "https://www.googleapis.com/auth/spreadsheets",
@@ -25,38 +26,35 @@ def _get_ws():
     ])
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(SHEET_ID)
-    return sh.sheet1  # 默认第一个工作表
-    
+    return sh.sheet1
 
-
-# --- 读取刺激 ---
+# ---------- 刺激扫描 ----------
 def scan_stim():
     rows = []
     for drv in ["VER","RUS","NOR"]:
         ddir = STIM / drv
-        if not ddir.exists(): 
+        if not ddir.exists():
             continue
         for p in sorted(ddir.glob("*.png")):
-            if p.name.endswith("_fp.png"):    # 指纹图
+            if p.name.endswith("_fp.png"):
                 rows.append(dict(condition="viz", driver=drv, path=str(p.relative_to(ROOT))))
-            if p.name.endswith("_heat.png"):  # 热力图
+            if p.name.endswith("_heat.png"):
                 rows.append(dict(condition="heat", driver=drv, path=str(p.relative_to(ROOT))))
-        for p in sorted((STIM/drv).glob("*.wav")):
+        for p in sorted(ddir.glob("*.wav")):
             if p.name.endswith("_aud.wav"):
                 rows.append(dict(condition="aud", driver=drv, path=str(p.relative_to(ROOT))))
     return pd.DataFrame(rows)
 
 @st.cache_data(show_spinner=False)
 def load_pool():
-    df = scan_stim()
-    return df
+    return scan_stim()
 
 pool = load_pool()
 if pool.empty:
     st.warning("未找到刺激。确认仓库内有 `stim/VER|RUS|NOR/*_fp.png`, `*_heat.png`, `*_aud.wav`。")
     st.stop()
 
-# --- 控制面板 ---
+# ---------- 控制面板 ----------
 colL, colR = st.columns([2,1])
 with colR:
     participant = st.text_input("被试 ID（必填）", "", placeholder="例如 test01")
@@ -64,24 +62,26 @@ with colR:
     modes = st.multiselect("包含模式", ["viz","heat","aud"], default=["viz","heat","aud"])
     if st.button("🔄 重新扫描刺激"):
         load_pool.clear()
-        st.experimental_rerun()
+        st.rerun()
 
 if not participant:
     st.info("请输入 被试 ID 开始。")
     st.stop()
 
-# --- 生成 ABX 列表（简单随即） ---
+# ---------- 构造 ABX 题目 ----------
 def make_abx_trials(df, n, modes):
     df = df[df["condition"].isin(modes)].reset_index(drop=True)
     trials = []
     rng = random.Random()
     for i in range(n):
-        # 抽一个模式
         cond = rng.choice(modes)
-        cand = df[df["condition"]==cond].sample(3, random_state=None).to_dict("records")
-        A, B, X = cand[0], cand[1], cand[2]
-        rng.shuffle([A,B])  # 随机化 A/B 次序
-        correct = "A" if A["driver"]==X["driver"] else "B"
+        cand = df[df["condition"]==cond].sample(3)
+        A, B, X = cand.iloc[0].to_dict(), cand.iloc[1].to_dict(), cand.iloc[2].to_dict()
+        # 随机化 A/B 次序
+        AB = [A, B]
+        rng.shuffle(AB)
+        A, B = AB[0], AB[1]
+        correct = "A" if A["driver"] == X["driver"] else "B"
         trials.append(dict(
             is_practice=False, condition=cond,
             A_driver=A["driver"], A_path=A["path"],
@@ -91,51 +91,73 @@ def make_abx_trials(df, n, modes):
         ))
     return trials
 
-if "trials" not in st.session_state or st.session_state.get("participant") != participant:
+# ---------- 会话初始化 ----------
+if ("trials" not in st.session_state) or (st.session_state.get("participant") != participant):
     st.session_state.participant = participant
     st.session_state.trials = make_abx_trials(pool, int(n_trials), modes)
     st.session_state.i = 0
-    st.session_state.logs = []
+    st.session_state.logs = []          # 本地日志（dict 列表）
+    st.session_state.local_rows = []    # Google 写失败的备份（list 列表）
 
-# --- 渲染一题 ---
+# ---------- Google Sheet 写入（统一在这里） ----------
+def log_trial_row_to_sheet(row_dict):
+    """row_dict: 与最终 DataFrame 字段一致的 dict。"""
+    # Sheet 的列顺序（与你想要导出的 CSV 一致）
+    cols = [
+        "participant","trial_index","is_practice","condition",
+        "A_driver","A_lap","A_path",
+        "B_driver","B_lap","B_path",
+        "X_driver","X_lap","X_path",
+        "answer","correct_answer","is_correct","rt_ms","timestamp"
+    ]
+    row_list = [row_dict.get(k, "") for k in cols]
+    try:
+        ws = _get_ws()
+        ws.append_row(row_list, value_input_option="RAW")
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+# ========== 主流程 ==========
 i = st.session_state.i
 trials = st.session_state.trials
+
+# —— 全部做完：展示下载按钮（此时 df 已定义）——
 if i >= len(trials):
     st.success("✅ 全部完成！下方可下载结果 CSV。")
     df = pd.DataFrame(st.session_state.logs)
-def log_trial_row(participant, t, clicked, correct, rt_ms, paths):
-    row = [
-        participant,
-        int(bool(t.get("is_practice", False))),
-        t.get("condition",""),
-        t.get("A_driver",""), t.get("A_lap",""), paths.get("A",""),
-        t.get("B_driver",""), t.get("B_lap",""), paths.get("B",""),
-        t.get("X_driver",""), t.get("X_lap",""), paths.get("X",""),
-        clicked,
-        correct,
-        int(clicked == correct),
-        int(rt_ms),
-        datetime.now().isoformat(timespec="seconds"),
-    ]
+    st.download_button(
+        "下载结果 CSV",
+        df.to_csv(index=False).encode("utf-8"),
+        file_name=f"{participant}_abx.csv",
+        mime="text/csv",
+        use_container_width=True
+    )
 
-    try:
-        ws = _get_ws()
-        ws.append_row(row, value_input_option="RAW")
-        st.info("已记录到 Google Sheet ✅")
-    except Exception as e:
-        st.warning(f"写入 Google Sheet 失败，已保存到本地 CSV（稍后可手动上传）。\n{e}")
-        if "local_rows" not in st.session_state:
-            st.session_state.local_rows = []
-        st.session_state.local_rows.append(row)
+    # 若有本地备份，也给一个下载口
+    if st.session_state.local_rows:
+        cols = [
+            "participant","trial_index","is_practice","condition",
+            "A_driver","A_lap","A_path",
+            "B_driver","B_lap","B_path",
+            "X_driver","X_lap","X_path",
+            "answer","correct_answer","is_correct","rt_ms","timestamp"
+        ]
+        df_local = pd.DataFrame(st.session_state.local_rows, columns=cols)
+        st.download_button(
+            "下载本地备份（写表失败的行）",
+            df_local.to_csv(index=False).encode("utf-8"),
+            file_name="abx_local_backup.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+    st.stop()
 
-
-st.download_button("下载结果 CSV", df.to_csv(index=False).encode("utf-8"),
-                    file_name=f"{participant}_abx.csv", mime="text/csv")
-st.stop()
-
+# —— 还在做题：渲染当前题目 —— 
 t = trials[i]
 st.subheader(f"题目 {i+1}/{len(trials)} — 模式：{t['condition'].upper()}")
-# —— 确保这一题有 start_time —— 
+
+# 开始计时
 if "start_time" not in st.session_state or st.session_state.start_time is None:
     st.session_state.start_time = time.time()
 
@@ -157,10 +179,7 @@ with c1:
 with c2:
     render_stim("B", t["B_path"])
 
-# --- 作答 & 计时 ---
-if "start_time" not in st.session_state:
-    st.session_state.start_time = time.time()
-
+# —— 作答 & 记录 —— 
 ans_col1, ans_col2 = st.columns(2)
 clicked = None
 with ans_col1:
@@ -169,49 +188,37 @@ with ans_col1:
 with ans_col2:
     if st.button("选 B", use_container_width=True):
         clicked = "B"
-      
-
 
 if clicked:
-    # 容错：若 start_time 丢了，就以当前时间当起点，至少不报错
+    # RT
     start = st.session_state.start_time or time.time()
     rt_ms = int((time.time() - start) * 1000)
 
+    # 形成一条日志（dict）
     row = dict(
-        participant=participant, trial_index=i, is_practice=False, condition=t["condition"],
+        participant=participant,
+        trial_index=i,
+        is_practice=False,
+        condition=t["condition"],
         A_driver=t["A_driver"], A_lap="", A_path=t["A_path"],
         B_driver=t["B_driver"], B_lap="", B_path=t["B_path"],
         X_driver=t["X_driver"], X_lap="", X_path=t["X_path"],
-        answer=clicked, correct_answer=t["correct_answer"],
+        answer=clicked,
+        correct_answer=t["correct_answer"],
         is_correct=int(clicked == t["correct_answer"]),
-        rt_ms=rt_ms, timestamp=pd.Timestamp.utcnow().isoformat(timespec="seconds")
+        rt_ms=rt_ms,
+        timestamp=datetime.utcnow().isoformat(timespec="seconds"),
     )
+    # 本地先存
     st.session_state.logs.append(row)
 
-    # 不显示对/错反馈，直接进入下一题
+    # 尝试写 Google Sheet（失败就备份）
+    ok, err = log_trial_row_to_sheet(row)
+    if not ok:
+        st.session_state.local_rows.append(row)
+        st.info("已落本地备份（稍后可手动上传 Google Sheet）。")
+
+    # 下一题
     st.session_state.i += 1
     st.session_state.start_time = None
     st.rerun()
-
-    # --- Google Sheet 连接
-    SCOPE = ["https://spreadsheets.google.com/feeds","https://www.googleapis.com/auth/drive"]
-    CREDS = Credentials.from_service_account_info(st.secrets["google_sheets"], scopes=SCOPE)
-    CLIENT = gspread.authorize(CREDS)
-    SHEET = CLIENT.open_by_key("你的SheetID").sheet1
-
-if "local_rows" in st.session_state and st.session_state.local_rows:
-    cols = [
-        "participant","is_practice","condition",
-        "A_driver","A_lap","A_path",
-        "B_driver","B_lap","B_path",
-        "X_driver","X_lap","X_path",
-        "answer","correct_answer","is_correct","rt_ms","timestamp"
-    ]
-    df_local = pd.DataFrame(st.session_state.local_rows, columns=cols)
-    st.download_button(
-        "下载本地备份 CSV",
-        df_local.to_csv(index=False).encode("utf-8"),
-        file_name="abx_local_backup.csv",
-        mime="text/csv"
-    )
-
