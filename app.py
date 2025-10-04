@@ -89,6 +89,9 @@ if i >= len(trials):
 
 t = trials[i]
 st.subheader(f"题目 {i+1}/{len(trials)} — 模式：{t['condition'].upper()}")
+# —— 确保这一题有 start_time —— 
+if "start_time" not in st.session_state or st.session_state.start_time is None:
+    st.session_state.start_time = time.time()
 
 def render_stim(label, rel_path):
     path = ROOT / rel_path
@@ -122,7 +125,10 @@ with ans_col2:
         clicked = "B"
 
 if clicked:
-    rt_ms = int((time.time() - st.session_state.start_time)*1000)
+    # 容错：若 start_time 丢了，就以当前时间当起点，至少不报错
+    start = st.session_state.start_time or time.time()
+    rt_ms = int((time.time() - start) * 1000)
+
     row = dict(
         participant=participant, trial_index=i, is_practice=False, condition=t["condition"],
         A_driver=t["A_driver"], A_lap="", A_path=t["A_path"],
@@ -133,8 +139,11 @@ if clicked:
         rt_ms=rt_ms, timestamp=pd.Timestamp.utcnow().isoformat(timespec="seconds")
     )
     st.session_state.logs.append(row)
+
+    # 不显示对/错反馈，直接进入下一题
     st.session_state.i += 1
     st.session_state.start_time = None
     st.rerun()
+
 
 
