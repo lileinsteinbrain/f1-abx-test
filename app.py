@@ -125,11 +125,16 @@ trials = st.session_state.trials
 # —— 全部做完：展示下载按钮（此时 df 已定义）——
 if i >= len(trials):
     st.success("✅ 全部完成！下方可下载结果 CSV。")
+
     df = pd.DataFrame(st.session_state.logs)
+
+    # 用 session_state 兜底，避免 NameError
+    pname = st.session_state.get("participant", "anon")
+
     st.download_button(
         "下载结果 CSV",
         df.to_csv(index=False).encode("utf-8"),
-        file_name=f"{participant}_abx.csv",
+        file_name=f"{pname}_abx.csv",      # ← 这里用 pname
         mime="text/csv",
         use_container_width=True
     )
@@ -147,11 +152,12 @@ if i >= len(trials):
         st.download_button(
             "下载本地备份（写表失败的行）",
             df_local.to_csv(index=False).encode("utf-8"),
-            file_name="abx_local_backup.csv",
+            file_name=f"{pname}_abx_local_backup.csv",   # ← 同理
             mime="text/csv",
             use_container_width=True
         )
     st.stop()
+
 
 # —— 还在做题：渲染当前题目 —— 
 t = trials[i]
