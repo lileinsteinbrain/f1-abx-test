@@ -96,7 +96,7 @@ def render_stim(label, rel_path):
     if rel_path.endswith(".png"):
         st.image(str(path))
     elif rel_path.endswith(".wav"):
-        st.audio(str(path.read_bytes()))
+        st.audio(path.read_bytes(), format="audio/wav")
     else:
         st.write("⚠️ 不支持的类型：", rel_path)
 
