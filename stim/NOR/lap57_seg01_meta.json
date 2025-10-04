@@ -1,0 +1,47 @@
+{
+  "feature_version": "fp8d.v1.0",
+  "grammar_version": "apex-hardbrake.v1.0",
+  "units": {
+    "time": "s",
+    "speed": "km/h",
+    "throttle": "0-1",
+    "brake": "0-1"
+  },
+  "resample_hz": 100,
+  "stimulus": {
+    "driver": "NOR",
+    "lap": 57,
+    "seg_id": 1,
+    "type": "HARD_BRAKE"
+  },
+  "fingerprint_raw": {
+    "thr_duty90": 0.5639770065999574,
+    "brk_duty20": 0.18926974664679583,
+    "thr_mod_freq": 0.425894378185072,
+    "brk_event_rate": 0.0851788756370144,
+    "coast_pct": 0.019374068554396422,
+    "exit_push": 0.5020920907887492,
+    "decel_aggr": 129.1668564796954,
+    "speed_var": 4888.217159283592
+  },
+  "global_quantile_5": {
+    "thr_duty90": 0.42105263157894735,
+    "brk_duty20": 0.15191210648637227,
+    "thr_mod_freq": 0.21886627270262915,
+    "brk_event_rate": 0.06376195536526609,
+    "coast_pct": 0.008025343189017951,
+    "exit_push": 0.0,
+    "decel_aggr": 88.43536349890454,
+    "speed_var": 3299.049259901592
+  },
+  "global_quantile_95": {
+    "thr_duty90": 0.6420274551214361,
+    "brk_duty20": 0.2608828939301042,
+    "thr_mod_freq": 0.6211180124030709,
+    "brk_event_rate": 0.14540167211397284,
+    "coast_pct": 0.04193138500635324,
+    "exit_push": 0.4020100502512444,
+    "decel_aggr": 118.74999999999969,
+    "speed_var": 5431.652371745096
+  }
+}
