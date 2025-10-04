@@ -27,7 +27,6 @@ def _get_ws():
     sh = gc.open_by_key(SHEET_ID)
     return sh.sheet1  # 默认第一个工作表
     
-sheet = get_sheet()
 
 
 # --- 读取刺激 ---
@@ -170,8 +169,7 @@ with ans_col1:
 with ans_col2:
     if st.button("选 B", use_container_width=True):
         clicked = "B"
-        paths = {"A": A_path, "B": B_path, "X": X_path}  # 你展示的三张图片路径
-        log_trial_row(participant, t, clicked, t["correct"], rt_ms, paths)
+      
 
 
 if clicked:
