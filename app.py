@@ -1,3 +1,5 @@
+import gspread
+from google.oauth2.service_account import Credentials
 import random, time
 from pathlib import Path
 import pandas as pd
@@ -83,6 +85,10 @@ trials = st.session_state.trials
 if i >= len(trials):
     st.success("✅ 全部完成！下方可下载结果 CSV。")
     df = pd.DataFrame(st.session_state.logs)
+    # --- 上传到 Google Sheet
+for _, row in df.iterrows():
+    SHEET.append_row(row.tolist())
+st.success("✅ 数据已自动上传至 Google Sheet！")
     st.download_button("下载结果 CSV", df.to_csv(index=False).encode("utf-8"),
                        file_name=f"{participant}_abx.csv", mime="text/csv")
     st.stop()
@@ -145,5 +151,9 @@ if clicked:
     st.session_state.start_time = None
     st.rerun()
 
-
+    # --- Google Sheet 连接
+    SCOPE = ["https://spreadsheets.google.com/feeds","https://www.googleapis.com/auth/drive"]
+    CREDS = Credentials.from_service_account_info(st.secrets["google_sheets"], scopes=SCOPE)
+    CLIENT = gspread.authorize(CREDS)
+    SHEET = CLIENT.open_by_key("你的SheetID").sheet1
 
