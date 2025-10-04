@@ -4,6 +4,8 @@ import random, time
 from pathlib import Path
 import pandas as pd
 import streamlit as st
+from datetime import datetime
+
 
 ROOT = Path(__file__).parent
 STIM = ROOT / "stim"   # stim/VER|RUS|NOR/...
@@ -11,18 +13,20 @@ STIM = ROOT / "stim"   # stim/VER|RUS|NOR/...
 st.set_page_config(page_title="F1 ABX Pilot", page_icon="🏁", layout="wide")
 st.title("F1 ABX Pilot Test")
 
-SHEET_ID = "1FUp4v1ZlGGY4r4pDeie96TXIp1F9eWnpI_HVc_w5c-M"
+SHEET_ID = "1FUp4v1ZlGGY4r4pDeie96TXIp1F9eWnpI_HVc_w5c-M"  # 你的那个 ID
 
-@st.cache_resource
-def get_sheet():
-    scope = [
+@st.cache_resource(show_spinner=False)
+def _get_ws():
+    # 从 secrets 取 service account JSON
+    sa = st.secrets["google_sheets"]
+    creds = Credentials.from_service_account_info(sa, scopes=[
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
-    ]
-    creds = Credentials.from_service_account_info(st.secrets["google_sheets"], scopes=scope)
-    client = gspread.authorize(creds)
-    return client.open_by_key(SHEET_ID).sheet1
-
+    ])
+    gc = gspread.authorize(creds)
+    sh = gc.open_by_key(SHEET_ID)
+    return sh.sheet1  # 默认第一个工作表
+    
 sheet = get_sheet()
 
 
@@ -100,21 +104,31 @@ trials = st.session_state.trials
 if i >= len(trials):
     st.success("✅ 全部完成！下方可下载结果 CSV。")
     df = pd.DataFrame(st.session_state.logs)
-    # --- 上传到 Google Sheet
-for _, row in df.iterrows():
-    SHEET.append_row(row.tolist())
-st.success("✅ 数据已自动上传至 Google Sheet！")
-# 把表头按你表里的顺序列出来
-cols = list(df.columns)
-values = [cols] + df[cols].astype(str).values.tolist()   # 先附表头（可选）
+def log_trial_row(participant, t, clicked, correct, rt_ms, paths):
+    row = [
+        participant,
+        int(bool(t.get("is_practice", False))),
+        t.get("condition",""),
+        t.get("A_driver",""), t.get("A_lap",""), paths.get("A",""),
+        t.get("B_driver",""), t.get("B_lap",""), paths.get("B",""),
+        t.get("X_driver",""), t.get("X_lap",""), paths.get("X",""),
+        clicked,
+        correct,
+        int(clicked == correct),
+        int(rt_ms),
+        datetime.now().isoformat(timespec="seconds"),
+    ]
 
-try:
-    # 如果你第一行已经手动写了表头，就用 append_rows 只传数据：
-    # sheet.append_rows(df[cols].astype(str).values.tolist(), value_input_option="RAW")
-    sheet.append_rows(values, value_input_option="RAW")
-    st.success("✅ 数据已自动上传到 Google Sheet！")
-except Exception as e:
-    st.warning(f"⚠️ 上传 Google Sheet 失败：{e}")
+    try:
+        ws = _get_ws()
+        ws.append_row(row, value_input_option="RAW")
+        st.info("已记录到 Google Sheet ✅")
+    except Exception as e:
+        st.warning(f"写入 Google Sheet 失败，已保存到本地 CSV（稍后可手动上传）。\n{e}")
+        if "local_rows" not in st.session_state:
+            st.session_state.local_rows = []
+        st.session_state.local_rows.append(row)
+
 
 st.download_button("下载结果 CSV", df.to_csv(index=False).encode("utf-8"),
                     file_name=f"{participant}_abx.csv", mime="text/csv")
@@ -156,6 +170,9 @@ with ans_col1:
 with ans_col2:
     if st.button("选 B", use_container_width=True):
         clicked = "B"
+        paths = {"A": A_path, "B": B_path, "X": X_path}  # 你展示的三张图片路径
+        log_trial_row(participant, t, clicked, t["correct"], rt_ms, paths)
+
 
 if clicked:
     # 容错：若 start_time 丢了，就以当前时间当起点，至少不报错
@@ -183,4 +200,20 @@ if clicked:
     CREDS = Credentials.from_service_account_info(st.secrets["google_sheets"], scopes=SCOPE)
     CLIENT = gspread.authorize(CREDS)
     SHEET = CLIENT.open_by_key("你的SheetID").sheet1
+
+if "local_rows" in st.session_state and st.session_state.local_rows:
+    cols = [
+        "participant","is_practice","condition",
+        "A_driver","A_lap","A_path",
+        "B_driver","B_lap","B_path",
+        "X_driver","X_lap","X_path",
+        "answer","correct_answer","is_correct","rt_ms","timestamp"
+    ]
+    df_local = pd.DataFrame(st.session_state.local_rows, columns=cols)
+    st.download_button(
+        "下载本地备份 CSV",
+        df_local.to_csv(index=False).encode("utf-8"),
+        file_name="abx_local_backup.csv",
+        mime="text/csv"
+    )
 
