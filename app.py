@@ -11,6 +11,21 @@ STIM = ROOT / "stim"   # stim/VER|RUS|NOR/...
 st.set_page_config(page_title="F1 ABX Pilot", page_icon="🏁", layout="wide")
 st.title("F1 ABX Pilot Test")
 
+SHEET_ID = "1FUp4v1ZlGGY4r4pDeie96TXIp1F9eWnpI_HVc_w5c-M"
+
+@st.cache_resource
+def get_sheet():
+    scope = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ]
+    creds = Credentials.from_service_account_info(st.secrets["google_sheets"], scopes=scope)
+    client = gspread.authorize(creds)
+    return client.open_by_key(SHEET_ID).sheet1
+
+sheet = get_sheet()
+
+
 # --- 读取刺激 ---
 def scan_stim():
     rows = []
@@ -89,6 +104,18 @@ if i >= len(trials):
 for _, row in df.iterrows():
     SHEET.append_row(row.tolist())
 st.success("✅ 数据已自动上传至 Google Sheet！")
+# 把表头按你表里的顺序列出来
+cols = list(df.columns)
+values = [cols] + df[cols].astype(str).values.tolist()   # 先附表头（可选）
+
+try:
+    # 如果你第一行已经手动写了表头，就用 append_rows 只传数据：
+    # sheet.append_rows(df[cols].astype(str).values.tolist(), value_input_option="RAW")
+    sheet.append_rows(values, value_input_option="RAW")
+    st.success("✅ 数据已自动上传到 Google Sheet！")
+except Exception as e:
+    st.warning(f"⚠️ 上传 Google Sheet 失败：{e}")
+
 st.download_button("下载结果 CSV", df.to_csv(index=False).encode("utf-8"),
                     file_name=f"{participant}_abx.csv", mime="text/csv")
 st.stop()
