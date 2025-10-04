@@ -133,11 +133,8 @@ if clicked:
         rt_ms=rt_ms, timestamp=pd.Timestamp.utcnow().isoformat(timespec="seconds")
     )
     st.session_state.logs.append(row)
-    if clicked == t["correct_answer"]:
-        st.success(f"✅ 正确！（RT={rt_ms} ms）")
-    else:
-        st.error(f"❌ 错误（RT={rt_ms} ms）")
     st.session_state.i += 1
     st.session_state.start_time = None
-    st.experimental_rerun()
+    st.rerun()
+
 
