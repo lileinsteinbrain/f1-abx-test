@@ -1,8 +1,8 @@
-# F1 ABX Test
+# Synthracer: F1 ABX Test
 
 **Can people tell Formula 1 drivers apart from their telemetry, and is it easier with pictures or with sound? A small online listening/viewing experiment.**
 
-Companion study to [hybrid-driver-demo](https://github.com/lileinsteinbrain/hybrid-driver-demo).
+Perceptual evaluation for **Synthracer** → system: [hybrid-driver-demo](https://github.com/lileinsteinbrain/hybrid-driver-demo).
 
 ## The idea
 If sonified telemetry really carries a driver's style, listeners should be able to match two clips from the same driver. An **ABX test** checks exactly that: you get samples A and B from two different drivers, plus X, and decide whether X matches A or B. The same test runs in three conditions so they can be compared:
